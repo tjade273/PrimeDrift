@@ -1,32 +1,30 @@
 import openai
 import os
+import time
 
-from sympy import randprime
+from sympy import isprime
+from random import randint
 
 openai.api_key = os.environ.get('OPENAI_API_KEY')
 
-MODEL_GPT4_MARCH = "gpt-4-0314"
-MODEL_GPT4_JUNE = "gpt-4-0613"
-
-
-
-# Random semiprime in range
-def random_semiprime(low, high):
-    low_sqrt = int(low**(1/2))
-    high_sqrt = int(high**(1/2))
-    return randprime(low_sqrt, high_sqrt)*randprime(low_sqrt, high_sqrt)
+MODELS = ['gpt-3.5-turbo-0301', 'gpt-3.5-turbo-0613', 'gpt-4-0314', 'gpt-4-0613']
 
 PROMPT = 'Is {} a prime number? Think step by step and then answer "[Yes]" or "[No]"'
 
 def evaluate(model, number):
-    response = openai.ChatCompletion.create(
-        model=model,
-        messages=[
-            {"role": "user", "content": PROMPT.format(number)}
-        ],
-        temperature=0.1,
-        max_tokens=1000,
-    )
+    try:
+        response = openai.ChatCompletion.create(
+            model=model,
+            messages=[
+                {"role": "user", "content": PROMPT.format(number)}
+            ],
+            temperature=0.1,
+            max_tokens=1000,
+        )
+    except Exception as e:
+        print(f"{e} waiting 10 seconds")
+        time.sleep(10)
+        return evaluate(model, number)
     return response['choices'][0]['message']['content']
 
 def extract_answer(response):
@@ -44,35 +42,29 @@ def score_response(response, reference):
     else:
         return int(answer == reference)
     
-def run_experiment(model, isprime):
-    lower, upper = 1000, 10000
-    number = randprime(lower, upper) if isprime else random_semiprime(lower, upper)
-    #print(f"Running experiment for {model} on {'prime' if isprime else 'semiprime'}: {number}")
+def run_experiment(model):
+    lower, upper = 10000, 100000
+    number = randint(lower, upper)
     response = evaluate(model, number)
-    score = score_response(response, isprime)
-    #print(f"Score: {score}")
-    return score, response
+    is_prime = isprime(number)
+    score = score_response(response, is_prime)
+    return [model, number, is_prime, score, response]
 
-N = 50
+if not os.path.exists('results.csv'):
+    with open('results.csv', 'w') as f:
+        f.write('model,number,is_prime,score\n')
 
-march_prime = [run_experiment(MODEL_GPT4_MARCH, True) for _ in range(N)]
-march_prime_score = sum([s for s, _ in march_prime]) / len(march_prime)
+N = 1000
+runs = []
 
-march_semiprime = [run_experiment(MODEL_GPT4_MARCH, False) for _ in range(N)]
-march_semiprime_score = sum([s for s, _ in march_semiprime]) / len(march_semiprime)
-
-june_prime = [run_experiment(MODEL_GPT4_JUNE, True) for _ in range(N)]
-june_prime_score = sum([s for s, _ in june_prime]) / len(june_prime)
-
-june_semiprime = [run_experiment(MODEL_GPT4_JUNE, False) for _ in range(N)]
-june_semiprime_score = sum([s for s, _ in june_semiprime]) / len(june_semiprime)
-
-print(f"March Prime Score: {march_prime_score}")
-print(f"March Semiprime Score: {march_semiprime_score}")
-print(f"March Overall Score: {(march_semiprime_score + march_prime_score)/2.0}")
-
-
-
-print(f"June Prime Score: {june_prime_score}")
-print(f"June Semiprime Score: {june_semiprime_score}")
-print(f"June Overall Score: {(june_semiprime_score + june_prime_score)/2.0}")
+with open('results.csv', 'a') as f, open('responses.csv', 'a') as g:
+    for i in range(N):
+        print(f"iteration: {i}", end='\r')
+        for model in MODELS:
+            run = run_experiment(model)
+            f.write(','.join([str(x) for x in run[:-1]]) + '\n')
+            f.flush()
+            g.write(run[-1] + '\n\n')
+            g.write('-'*50 + '\n\n')
+            g.flush()
+            runs.append(run)
